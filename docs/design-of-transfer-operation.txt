@@ -1,0 +1,58 @@
+		      CSE535: Asynchronous Systems            2014-09-27
+		   Scott Stoller, Stony Brook University
+
+                      Project: Chain Replication
+                     Design of Transfer Operation
+
+a key observation is that the chain replication algorithm would satisfy the
+reliability requirement for transfers, if the servers for both banks were
+in a single chain.  to see this, note that in chain replication, if a
+server performs an update, then all upstream servers in the chain have
+already performed it, and all downstream servers in the chain will
+eventually perform it, due to the assumption of reliable communication
+between servers and the use of Sent sets to retransmit updates lost due to
+crash failures.  this observation leads to a simple solution: to process a
+transfer from bank1 to bank2, create a (conceptual) chain that is the
+concatenation of the chains for bank1 and bank2, and perform the transfer
+by running the chain replication algorithm in this chain.
+
+a naive realization of this approach would maintain complete and separate
+data structures for the conceptual combined chain.  however, the solution
+can be realized in a much simpler way.  the main requirement is to ensure
+that, 
+
+
+(1) if bank2 loses the transfer request due to failures (e.g., due to
+failure of head of bank2 before it forwards the request to its successor),
+then the tail of bank1 will retransmit it to the new head of bank2
+ 
+(2) if bank1's tail fails, then bank1's new tail will take over this
+responsibility.  this can be accomplished by including transfer requests in
+the Sent sets of all servers in bank1 (including the tail, whose Sent set
+is always empty in the original chain replication algorithm), and making
+the tail of bank1 responsible for re-sending transfer requests to the new
+head of bank2 when informed that the old head of bank2 failed, in exactly
+the same way that a server S^- is responsible for re-sending requests to
+S^+ when informed than an internal server S failed
+
+one issue is that extending bank1's chain has the effect of inserting a new
+server in the middle of the conceptual combined chain.  the original chain
+replication algorithm does not provide a way to do this.  we could invent
+an extension of the algorithm to do this; it will at least involve copying
+the Sent set of bank1's old tail to bank1's new tail.  Or, we can avoid the
+need for this extension of the algorithm by not processing chain extensions
+and tranfers concurrently.  when an extension of bank1's chain is
+requested, we can wait until all previous transfer requests at bank1 have
+been processed and acknowledged by the destination bank (this is indicated
+by the Sent set of bank1's tail being empty), start delaying new transfer
+requests at bank1, extend bank1's chain, and then process the delayed
+transfer requests.
+
+another perspective on the whole design is that the tail of bank1 acts as a
+client of bank2.  this leads to a design with a similar communication
+pattern, except that bank2's tail replies to source bank1's tail, and the
+latter replies to the client.  this approach also requires a mechanism for
+a new tail of bank1 to take over the responsibility of transmitting or
+retransmitting the transfer request to bank2, in scenarios involving
+failure of bank1's tail, bank2's head, etc.  this can be handled in
+essentially the same way as in the above design.

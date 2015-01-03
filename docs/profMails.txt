@@ -1,0 +1,309 @@
+There is a google group for questions about DistAlgo.  (please read documentation carefully first, including README.md).  from the distalgo file download page mentioned in project.txt, click on Wiki tab, which contains a link to the google group.
+
+----
+
+ > I'm on my way doing the socket communication(TCP/UDP) between clients
+ > and servers/masters. According to the description, each server or
+ > master is a process, so each of them has its own ip address and port
+ > number, which is a socket. However,  each client runs on a separate
+ > thread, that is to say, different clients can share the same socket <ip
+ > address, port number>, since threads can share resources. Am I right?
+
+different clients should have different <ip address, port number> and use different sockets for communication, even if the clients are running in the same process for convenience.
+
+incidentally, one of the conveniences of DistAlgo is that you do not need to worry about low-level issues like sockets.  DistAlgo takes care of that for you.
+
+-----
+ >Hello Prof.
+>Do we need to read topology from configuration for phase-2 ?
+>If yes,  then how many chains, clients and transactions are expected to be in confIguration?
+
+
+There isn't a need to specify topology (connectivity) in the config file, because all processes can communicate with all others as appropriate. 
+
+
+project.txt gives some guidance about number of chains (banks) and clients; please check.  you should determine appropriate number of transactions for effective testing.
+-----
+
+> Professor Stoller, 
+ > We had a couple of questions pertaining to the Project Implementation: 
+
+ > 1. Theoretically, there is only one PendingObj for each chain, wherein the
+ > head adds the reqID of incoming request to it, and the tail upon processing
+ > of the request, removes the reqID from it. Also, if the tail gets query
+ > request, it adds to the PendingObj. As such, it is a structure, which is
+ > "common" across the entire chain.
+
+ > Now, while implementation, we thought of the following choices, but each
+ > one of them is having some lacuna:
+
+ > (a) Keep the reqIDs of the PendingObj in a single file on one machine, and
+ > let the head and tail processes modify the same.
+ > Drawback: We are assuming that the head and tail processes are running on
+ > the same machine.
+
+as you realize, this approach is not acceptable.  as I wrote on Sep 27, in
+response to another question about the project, "of course, you should not
+take advantage of the fact that the processes are on the same machine: the
+processes should not use shared memory, shared files, etc."
+
+ > (b) Each server maintains its own copy of PendingObj (like HistObj and
+ > SentObj), and propagates the same through the chain. Upon request process
+ > completion, the tail will remove the reqID from its PendingObj and send an
+ > ack(reqID) to the servers backwards. Upon receiving this ack(reqID), each
+ > server removes the reqID from its PendingObj (and SentObj).
+
+ > Drawback: The PendingObj may not be consistent across all the PendingObj
+ > maintained in the chain. Also, if during the acknowledgement process that
+ > the Tail has initiated for removing the reqID from PendingObj and SentObj,
+ > in case any server crashes, the ack(reqID) will get stuck up.  
+
+ > Could you kindly help us in choosing a better approach.
+
+if you are talking about the variable Pending_objID introduced in Section 2
+of the paper on chain replication, this variable is used only in the
+specification of chain replication.  This variable is not part of the
+implementation.  the second bulleted item in section 3.1 (and the last
+top-level bullet on slide 12 of the lecture notes) indicate how
+Pending_objID is related to events performed by the implementation, namely,
+receiving requests and processing requests.  this relationship is used only
+to prove that the implementation satisfies the specification.
+
+ > 2. As mentioned in 1(b) above, is it required that fault tolerance is
+ > implemented for the ack(reqID) that the tail sends to its predecessors.
+
+this issue is addressed on slides 21-22 of the lecture notes on chain
+replication.
+----
+> This is regarding the implementation of Phase 1, non-fault tolerant
+ > service. As far as client requests are concerned, do I have to consider
+ > a test-case where a client re-transmits because of no reply from the
+ > server (assuming that either server did not receive the earlier request
+ > or client did not receive the server's reply). 
+
+ > I have this doubt because the re-transmission happens only if a request
+ > is lost. As we'll be running client-server processes on the same
+ > machine, the requests will never actually be lost. So, do we have to
+ > explicitly consider one such case where I make the server ignore one
+ > particular client request and then proceed to re-transmission by client? 
+
+for non-fault-tolerant service (phase 2), you do not need to consider scenarios with message loss between clients and servers.  
+
+for subsequent phases, you do need to consider such scenarios, because such with message loss is one of the types of failures that chain replication is designed to tolerate.  you will need to introduce such failures synthetically (i.e., simulate them), in a similar way as server lifetimes (specified in the configuration file) are used to simulate server failures.  you should introduce some lines in the configuration file to specify when and how often message loss between clients and servers occurs.
+
+
+----
+
+
+[this is in response to a question that appears below.]
+
+the intended principle for handling duplicate requests is that the same response should be sent each time the request is received.  some other semantics might be acceptable for these particular bank operations, but we will adhere to this principle for simplicity and uniformity.
+
+as you point out, the specification in project.txt violates this principle for withdraw and transfer operations for which there are insufficient funds, because <reqID, InsufficientFunds, balance> will be returned the first time, and <reqID, Processed, balance> will be returned subsequent times.  this is an error on my part; I apologize for the resulting confusion and extra work.  to make the specification consistent with the above principle, in the specification of all three operations (deposit, withdraw, and transfer), replace the sentence
+
+  if exactly the same transaction has already been processed, simply 
+  return <reqID, Processed, balance>.
+
+with
+
+  if exactly the same transaction has already been processed, 
+  re-send the same reply.
+
+this correction also clarifies that the balance that should be included in the response to a duplicate of a successful request (regardless of whether it is a deposit, withdraw, or transfer) is the balance that was included in the initial response to that request.  for example, suppose a client does a successful deposit of $100 with reqID=0, and the resulting balance is $100.  the client then does a successful withdraw of $50 with reqID=1, and then re-sends the initial deposit request with reqID=0 (or perhaps the client re-sent the deposit request before sending the withdrawal request, but the duplicate deposit request arrived after the withdrawal request; the server can't distinguish these two scenarios).  the response to this duplicate request should be exactly the same as before, namely, <reqID=0, Processed, $100>.
+
+for brevity, only the sequence number component of the reqID is shown in this example, even though the reqID should actually have some structure, such as bankName.clientNumber.sequenceNumber, to ensure uniqueness, as mentioned in project.txt.
+
+I do not regard this semantics as blocking valid withdraws.  the request ID is like a timestamp; indeed, a timestamp can be used instead of a sequence number.  if an attempted withdrawal at (say) 10am led to insufficient funds, re-sending the request message does not change that fact.  a new withdrawal attempt at a later time should have a new reqID.
+
+this specification does require storing withdrawals and transfers that lead to InsufficientFunds in the sequence of processed transactions for the account.  I believe this is realistic.  for example, if I write a check for $1000, and my bank account contains $100, my next bank statement will contain an entry (with an overdraft fee) for the bounced check.
+
+for requests that lead to InconsistentWithHistory responses, I believe the specification is already consistent with the above principle, and there is no need to store the requests that produce those responses.
+
+scott
+
+
+From: ...
+To: Scott Stoller
+Subject: Short cuts on InsufficientFunds/InconsistentWithHistory
+
+Hi Professor,
+ During the implementation, I was confused about the behavior on transactions that produced InsufficientFunds/InconsistentWithHistory outcomes. 
+
+The question is that should we store these transactions in processedTrans (and treat them as processed trans)? 
+
+1. If we do, when we got the exact same trans again, "simple return <reqID, Processed, balance>" in the document will lead to wrong result. And it should be changed to "return processedTrans[reqID]".
+
+The drawback of this design would be sometimes it would block "valid withdraws". Say we have two clients have same accountNum and the balance is 0. First client1 is trying to withdraw(1) but he didn't get the reply, then client2 made a deposit(1) successfully. Now the client1 timeout and re-transmit the withdraw. At this scenario, server will return a InsufficientFunds but actually there are sufficient funds.
+
+balance =      0                 1                   1                          1           
+ client1 - withdraw(0) -------------------retry(withdraw(0))--------- InsufficientFunds-----
+ client2 ---------------------deposit(1)--------------replied--------------------------------------------
+
+2. If we don't, that means we can safely stop replicating these transactions to the rest of this chain and reply to client at the head server. Because these transactions are "rejected" and they have no effect on objects(the balance). This short cut implementation will treat these "updates" as queries, and has some performance improvement.
+
+The drawback of this design is that consider the same scenario as the previous approach, the client1 may receive two reply for same reqId with different outcomes.
+
+balance =      0                 1                   1                     0                                  0
+ client1 - withdraw(0) ----------------retry(withdraw(0))----Processed(2rd W/D)---InsufficientFunds(1stW/D)-
+ client2 -------------------deposit(1)--------------replied----------------------------------------------------------------------------
+
+
+So, should we store and replicate these failed transactions in processedTrans?
+
+
+----
+
+ [UPDATE 2014-10-04: in each of the following 3 paragraphs, I replaced "if
+  exactly the same transaction has already been processed for this account,
+  simply return <reqID, Processed, balance>." with "if exactly the same
+  transaction has already been processed, re-send the same reply."]
+  
+----
+
+
+an alert student found a bug in DistAlgo (see details below).  Bo posted a new DistAlgo distribution, version 1.0.0b5, available at hte same link as before (in project.txt).  to get the bug fix, you can either apply the change below (the incorrect line is commented; the corrrect version of that line appears immediately below it)  or download the new version of DistAlgo.
+
+
+scott
+
+
+
+
+File:- dist-packages/da/compiler/pygen.py (line 905)
+
+
+ def visit_DeleteStmt(self, node):
+        targets = [self.visit(tgt) for tgt in node.targets]
+        # ast = Delete(tgt)
+        ast = Delete(targets)
+        return concat_bodies(targets, [ast])
+		
+----
+Bo (the main DistAlgo developer) writes:
+
+
+ > sorry, 1.0.0b5 tarballs were missing an essential file.
+
+
+ > I just removed 1.0.0b5 and uploaded 1.0.0b6.
+----
+
+
+ > In project description it is mentioned that client request description of
+ > given bank can be given by function random(seed, numReqs, probDeposit,
+ > probWithdraw, probQuery).  Now should this be same for every client of a
+ > given bank or should we specify random function for every client of given
+ > bank ? 
+
+it can be the same for every client of a given bank.  of course, you can make it different for each client if you prefer.
+
+----
+
+as you might have noticed by looking at the DistAlgo examples, the Python syntax for a DistAlgo receive statement is
+
+
+def receive(msg=mexp, from_ = pexp, at = (l1 , ..., lj )):
+  handler_body
+
+
+the DistAlgo language description accidentally omits "msg=".  sorry for any confusion this caused.
+
+----
+a while ago, I posted a reading on DistAlgo, "From Clarity to Efficiency for Distributed Algorithms".  I encourage everyone to read it, if you haven't already.  although the DistAlgo syntax in it is slightly outdated, it provides more details than the DistAlgo Language Description on some aspects of the language.  for example, it provides a more detailed desciption of how receive handlers work.
+
+
+I just posted another document, which I wrote, containing an operational semantics for the core features of DistgAlgo.  I don't expect everyone to read it, but I wanted to make it available, since some people might find it useful.
+----
+ > In Distalgo suppose client is sending a msg to server. How should be
+ > write send method for client specifying ip address of server? 
+ > send(mexp, to = pexp)
+ > can we give ip address in place of pexp in send method. for example
+ > send(mext, to = "107.108.216.214")
+
+in DistAlgo, you should not use IP addresses directly.  send should always
+be to a DistAlgo process or set of processes, as in the DistAlgo examples.
+
+The DistAlgo implementation should ignore the IP addresses and port numbers
+in the configuration file.  sorry I did not think of this sooner.
+----
+ > So from the same da file(DistAlgo file) we will start client and server
+ > processes and pass head and tail process to client to send update and query
+ > messages to head and tail respectively? If so then actually it is virtually
+ > distributed system because we are running client and server processes on
+ > the same machine not on different machines.
+
+yes.  with DistAlgo, all processes will run on the same machine.  the "at
+<node>" clausea for process creation, which allows runnung processes on
+remote nodes, is working in a development version of DistAlgo but is not
+fully supported and documented in the version you are using.
+----
+ > We have a small query.  Should we put all the server, master and
+ > client code in a single file? All the examples in distalgo are
+ > coded in one file.
+
+
+> We are organizing the code in multiple files. Server code in one
+ > file and master in another file.
+
+
+you are welcome to put the code in one file or multiple files, as you prefer.
+----
+ > I have noticed that in the grading sheet both the randomized and
+ > itemized request generation are counted as part of grade. However, in
+ > the project description, it is said that we can choose one of
+ > them. Could you explain this discrepancy? That is to say we need to have
+ > multiple formats of configuration files?
+
+the project description does not say that you can choose.  it says the
+"description of a client's requests in the configuration file can have one
+of two forms".  the intended meaning is that both forms must be supported.
+sorry if this was unclear.
+----
+> I have small question on what values to give to account number and amounts
+ > in the requests that are sent from client.  Presently I am randomly
+ > generating those values from a list of input values for account numbers and
+ > amounts in config file. Is this method okay ?
+
+when the config file says that client requests should be generated randomly,
+then account numbers and amounts should be generated randomly.  when the
+config file contains itemized client requests, those items in the config
+file should specify the account number and amount for each request.
+----
+ > Does a client send request only to a specific bank's servers or could send
+ > requests to different banks?  Thank you!
+
+either way is fine.
+----
+
+
+there have been some bug fixes in DistAlgo.  please go to the DistAlgo files page at http://sourceforge.net/projects/distalgo/files/ and download 1.0.0b8.
+----
+Unfortunately, I found an error in the paxos example on the last few slides of paxos.pdf.  as mentioned on the Acknowledgements slide, that example was copied from a blog. I should have checked it more carefully.  I apologize for any confusion.  the error is that prepare requests should contain only a proposal number n, not a value v.  To see this, note that the description of prepare requests in the paper is "A proposer selects a proposal number n and sends a prepare request with number n to a majority of acceptors."  This does not mention including a value.  I posted a new version of the lecture notes on paxos, with a corrected version of the example.  sorry, the corrections are a bit messy.  when I have time, I will redraw the example from scratch.
+----
+> 1. Last paragraph of Section 3 in the paper mentions that the new value
+ > which is computed once by the head and then forwarded down the chain, so
+ > that each replica has only to perform a write.
+ > To mimic the above feature, from implementation perspective, we are passing
+ > the modified Account object from the head to the successive servers, and
+ > then each intermediate server and tail only replaces that modified Account
+ > object within their own copy of list of Account objects.  Just wanted to
+ > clarify if this will be acceptable implementation.
+
+that paragraph in the paper talks about "forwarding of state changes" along the chain, not forwarding of the state.  in our project, an update message should specify how an account object should be updated.  an update message should not contain the entire state of the affected account (e.g., it should not contain the entire history of processed transactions for the affected account).
+
+ > 2. Do the config files for DistAlgo and Java need to be same, or they
+ > can differ in syntax so as to leverage the constructs of the language.
+
+they can differ.
+----
+> I'm planning of writing HTTP REST API for servers. Can I use HTTP for
+ > client-server communication.
+
+this is OK, but you still need to introduce message loss synthetically, as described in my message of 2014-10-03, an excerpt from which appears below.
+
+scott
+
+for non-fault-tolerant service (phase 2), you do not need to consider scenarios with message loss between clients and servers.  
+
+for subsequent phases, you do need to consider such scenarios, because such with message loss is one of the types of failures that chain replication is designed to tolerate.  you will need to introduce such failures synthetically (i.e., simulate them), in a similar way as server lifetimes (specified in the configuration file) are used to simulate server failures.  you should introduce some lines in the configuration file to specify when and how often message loss between clients and servers occurs.
+----

@@ -1,0 +1,555 @@
+		      CSE535: Asynchronous Systems            2014-10-04
+		   Scott Stoller, Stony Brook University
+
+		      Project: Chain Replication
+
+============================================================
+OVERVIEW
+
+Implement chain replication, as described in
+
+  [vRS2004chain] Robbert van Renesse and Fred B. Schneider.  Chain
+  Replication for Supporting High Throughput and Availability.  In
+  Proceedings of the 6th Symposium on Operating Systems Design and
+  Implementation (OSDI), pages 91-104.  USENIX Association, 2004.
+  http://www.cs.cornell.edu/fbs/publications/ChainReplicOSDI.pdf
+
+Also, design and implement an extension to handle an operation that
+involves multiple chains, as described below.
+
+Chain replication is also described in
+
+  [vrG2010replication] Robbert van Renesse and Rachid Guerraoui.
+  Replication Techniques for Availability. In Replication: Theory and
+  Practise, Bernadette Charron-Bost, Fernando Pedone, and Andre Schiper,
+  editors, volume 5959 of Lecture Notes in Computer Science, pages 19-40.
+  Springer-Verlag, 2010.
+  http://www.cs.cornell.edu/Courses/cs5414/2012fa/publications/vRG10.pdf
+
+The algorithm is fundamentally the same in both papers, but some details
+differ.  The first paper is more detailed in some respects, so it will be
+our primary reference, but the second paper is also worth reading.
+
+{UPDATE 2014-09-26]
+Your implementation must allow each server to run on a different machine.
+
+{UPDATE 2014-09-29]
+All communication must be explicit using some form of messages.  Use of
+shared files or distributed shared memory is not permitted.
+
+To simplify the correctness proof, the papers describe the protocol as
+storing a complete history (sequence of updates) for each object.  As the
+papers point out, an actual implementation (like yours!) should store the
+current state of each object instead.
+
+This project is inspired in part by the project for Fred Schneider's Fall
+2012 CS5414 Distributed Computing Principles, available at
+http://www.cs.cornell.edu/Courses/cs5414/2012fa/
+
+============================================================
+FUNCTIONALITY OF THE REPLICATED SERVICE
+
+the replicated service stores bank account information.  it stores the
+following information for each account: (1) balance, (2) sequence of
+processed updates, denoted processedTrans.
+
+the service supports the following query and update requests.  the reply to
+each request is an instance of the class Reply, shown below as a tuple for
+brevity.
+
+enum Outcome { Processed, InconsistentWithHistory, InsufficientFunds }
+
+class Reply {
+  string reqID;
+  Outcome outcome;
+  float balance;
+}
+
+note: making request identifiers strings (rather than numbers) allows them
+to have structure, e.g., "1.1.1".  this makes it easier to generate unique
+request identifiers, using a structure such as
+bankName.clientNumber.sequenceNumber.
+
+QUERIES
+
+  getBalance(reqID, accountNum): returns <reqID, Processed, balance>.
+
+UPDATES
+
+  [UPDATE 2014-10-04: in each of the following 3 paragraphs, I replaced "if
+  exactly the same transaction has already been processed for this account,
+  simply return <reqID, Processed, balance>." with "if exactly the same
+  transaction has already been processed, re-send the same reply."]
+
+  deposit(reqID, accountNum, amount): if a transaction with this reqID has
+  not been processed for this account, increase the account balance by the
+  amount, append the transaction to processedTrans, and return <reqID,
+  Processed, balance>, where balance is the current balance.  if exactly
+  the same transaction has already been processed, re-send the same reply.
+  if a different transaction with the same reqID has been processed for
+  this account, return <reqID, InconsistentWithHistory, balance>.
+
+  withdraw(reqId, accountNum, amount): if a transaction with this reqID has
+  not been processed for this account, and the account balance is at least
+  the amount, decrease the account balance by the amount, append the
+  transaction to processedTrans, and return <reqID, Processed, balance>.
+  if a transaction with this reqID has not been processed for this account,
+  and the account balance is less than the amount, return <reqID,
+  InsufficientFunds, balance>.  if exactly the same transaction has already
+  been processed, re-send the same reply.if a different transaction with
+  the same reqID has been processed, return <reqID,
+  InconsistentWithHistory, balance>.
+
+  transfer(reqID, accountNum, amount, destBank, destAccount): if a
+  transaction with this reqID has not already been processed, and the
+  account balance is at least the transfer amount, then transfer the
+  requested amount of funds from the specified account in this bank to
+  destAccount in destBank, and return <reqID, Processed, balance>.  if a
+  transfer with this reqID has not already been processed, and the account
+  balance is less than the transfer amount, return <reqID,
+  InsufficientFunds, balance>.  if exactly the same transaction has already
+  been processed, re-send the same reply.  if a different transaction with
+  the same reqID has been processed, return <reqID, InconsistentWithHistory, 
+  balance>.  [UPDATE, 2014-09-17: added the following] It is acceptable for
+  a server of either the source bank or the destination bank to send a
+  reply to the client.  However, the client should send the request only to
+  a server of the source bank; the client should not need to send a request
+  to a server of the destination bank.
+
+============================================================
+SIMPLIFICATIONS
+
+if an account mentioned in a request does not already exist, then it is
+automatically created, with initial balance 0, and then the request is
+processed as described above.
+
+assume clients never send requests with non-positive amounts.
+
+assume the master never fails.  therefore, you do not need to implement
+Paxos.
+
+the same master is used by all banks.  the master reports every failure to
+all servers of all banks.  [UPDATE, 2014-09-18: the master also reports
+failures to clients.]
+
+assume that the pattern of failures is limited so that there is always at
+least one living server for each bank.
+
+it is sufficient to store all information in RAM.  it's OK that information
+stored by a process is lost when the process fails or terminates.
+
+it is sufficient to test your system with all of the clients being threads
+in a single process.  you should run testcases with up to 3 banks and up to
+6 clients per bank.
+
+============================================================
+NETWORK PROTOCOLS
+
+as stated in the paper, communication between servers (including the
+master) should be reliable, so use TCP as the underlying network protocol
+for it, and assume that TCP is reliable.  this applies to communication
+between servers in the same or different chains.
+
+communication between clients and servers may be unreliable, so use UDP as
+the underlying network protocol for it.  for simplicity, assume that each
+request or reply fits in a single UDP packet.
+
+============================================================ 
+CONFIGURATION FILE
+
+all clients, servers, and the master read information from a configuration
+file whose name is specified on the command line.  for simplicity, all
+three kinds of processes read the same configuration file, and each kind of
+process ignores the information it does not need.  note: this implies that
+configuration file contains information for all banks.
+
+the configuration file contains enough information to specify a testcase;
+thus, you can run different testcases simply by supplying different
+configuration files.  information in the configuration file includes (but
+is not limited to): the names of the banks, the length of the chain for
+each bank, Internet addresses and port numbers of the master and servers
+(for all banks), the number of clients of each bank, a description of the
+requests submitted by each client (explained below), server
+startup delays, and server lifetimes (explained below).
+
+the configuration file should have a self-describing syntax.  instead of
+each line containing only a value, whose meaning depends on the line number
+(where it is hard for readers to remember which line number contains which
+value), each line should contain a label and a value, so the reader easily
+sees the meaning of each value.
+
+the description of a client's requests in the configuration file can have
+one of two forms: (1) a single item random(seed, numReq, probGetBalance,
+probDeposit, probWithdraw, probTransfer), where seed is a seed for a
+pseudo-random number generator, numReq is the number of requests that will
+be issued by this client, and the remaining parameters (which should sum to
+1) are the probabilities of generating the various types of requests.  (2)
+a sequence of items, each representing one request using some readable and
+easy-to-parse syntax, such as "(getBalance, 1.1.1, 46)".  the configuration
+file should also contain separate entries controlling the following: the
+duration a client waits for a reply, before either resending the request or
+giving up on it; the number of times a client re-sends a request before
+giving up on it; whether the client re-sends a request to the new head for
+a bank, if the client, while waiting for a reply from that bank, is
+notified by the master of failure of the head for the bank.
+
+the configuration file specifies a startup delay (in milliseconds) for
+each server.  a server's main thread does essentially nothing except sleep
+until the server's startup delay has elapsed.  this feature facilitates
+testing of the algorithm for incorporating new servers (i.e., extending the
+chain).  servers that are part of the initial chain have a startup delay of
+zero.
+
+the configuration file specifies a lifetime for each server, which may be
+(1) "receive" and a number n (the server terminates immediately after
+receiving its n'th message), (2) "send" and a number n (the server
+terminates immediately after sending its n'th message), or (3) "unbounded"
+(the server never terminates itself).  furthermore, the number n in (1) and
+(2) can be replaced with the string "random", in which case the server
+generates a random number in a reasonable range, outputs it to a log file,
+and uses that number.
+
+configuration files that satisfy some variant of the above requirements are
+also acceptable, provided they provide a comparable level of control, as
+needed for thorough testing of fault-tolerant distributed systems.
+
+tip: you will have numerous configuration files.  to help keep track of them,
+organize them into folders, and try to give them meaningful names.
+
+[UPDATE 2014-10-03: added the following.]  for non-fault-tolerant service
+(phase2), you do not need to consider scenarios with message loss between
+clients and servers.  for subsequent phases, you do need to consider such
+scenarios, because such with message loss is one of the types of failures
+that chain replication is designed to tolerate.  you will need to introduce
+such failures synthetically (i.e., simulate them), in a similar way as
+server lifetimes (specified in the configuration file) are used to simulate
+server failures.  you should introduce some lines in the configuration file
+to specify when and how often message loss between clients and servers
+occurs.
+
+============================================================
+LOGS
+
+every process should generate a comprehensive log file describing its
+initial settings, the content of every message it received, the content of
+every message it sent, and every significant internal action it took.
+every log entry should contain a real-time timestamp.  every log entry for
+a sent message should contain a send sequence number n, indicating that it
+is for the n'th message sent by this process.  every log entry for a sent
+message should contain a receive sequence number n, indicating that it is
+for the n'th message received by this process.  (send and receive sequence
+numbers are useful for choosing server lifetimes that correspond to
+interesting failure scenarios.)  the log file should have a self-describing
+syntax, in the same style as described for the configuration file.  for
+example, each component of a message should be labeled to indicate its
+meaning.
+
+============================================================
+FAILURE DETECTION
+
+chain replication is designed to work correctly under the fail-stop model,
+which assumes perfect failure detection (cf. [vRG2010replication, section
+2.4]).  there are two completely different approaches to handling this.
+
+one approach, suitable during development and testing, is to "fake" failure
+detection.  specifically, when a server is preparing to terminate as
+specified by its configuration, it sends a message announcing its
+termination to the master.  with this approach, the master implements
+failure detection simply by waiting for such notifications.  this
+approach's advantage is guaranteed absence of false alarms.  this
+approach's disadvantage is that unplanned failures (e.g., a process
+terminating due to an uncaught exception) are not detected.
+
+the other approach is to implement real failure detection, using timeouts.
+for example, each server S sends a UDP packet containing S's name to the
+master every 1 second.  every (say) 5 seconds, the master checks whether it
+has received at least 1 message from each server that it believes is alive
+during the past 5 seconds.  if not, it concludes that the uncommunicative
+servers failed.  note that a few occasional dropped UDP packets should not
+cause the master to conclude that a server has failed.  this approach never
+misses real failures, but it can produce false alarms if enough packets are
+dropped or delayed.
+
+  aside: another approach is to keep a TCP connection open between the
+  master and each server, and let exceptions raised by the TCP socket
+  indicate server failure.  this approach is not recommended, because it is
+  less transparent and less flexible.
+
+you should adopt the second approach.  your testing scenarios will not
+involve wide-area networks or high network congestion, so it should be easy
+to find settings that avoid false alarms, and you will gain the experience
+of implementing a failure detector.
+
+============================================================
+PROGRAMMING LANGUAGES
+
+Each team will implement most of the project (all except the last phase) in
+two programming languages.  This will provide experience implementing
+distributed systems in different languages and will provide insight into
+the strengths and weaknesses of those languages by allowing direct
+comparison of their use to implement the same algorithm.  One of the
+languages must be DistAlgo, an extension of Python designed to make
+distributed algorithms easier to write.  The other language can be any
+programming language of your choice except Python (which overlaps too much
+with DistAlgo).
+
+[UPDATE 2014-09-29]
+The DistAlgo distribution is available at 
+http://sourceforge.net/projects/distalgo/files/
+
+============================================================
+PHASE 0: TEAM FORMATION
+
+find exactly one teammate.  one member of each team should send a message
+to stoller@cs.stonybrook.edu containing the names and email addresses of
+both team members.  if you cannot find a teammate, don't panic!  just send
+me a message stating this, and I will find a teammate for you.  every team
+will have exactly two members.  the only exception to this policy will be:
+if the number of students in the class is odd, I will choose one person
+with no teammate and either add them to a team or ask them to work alone.
+
+------------------------------------------------------------
+PHASE 1: PSEUDO-CODE
+
+1.  write complete pseudo-code for clients, servers, and the master that
+supports all operations except transfer.  for clients, include only
+pseudo-code for the protocol (e.g., keep track of which servers are
+currently the head and tail), not pseudo-code for reading the configuration
+file generating random requests, etc.  for servers, remember to maintain
+the account information described above.  make threads, synchronization,
+and communication explicit, keeping other aspects of the pseudo-code (e.g.,
+data structures) at a high level of abstraction.  the pseudo-code should
+include a reasonable amount of explanatory comments.  encapsulate the
+details of the banking service operations in methods, so they do not
+clutter the main part of the pseudo-code.
+
+you may use the pseudo-code in [vRG2010replication] as a starting point if
+desired.  keep in mind that it differs from what is required here in some
+ways.  for example, it omits the algorithm for extending a chain, it omits
+pseudo-code for failure detection, and it stores the entire history instead
+of the current state, it sends the entire history instead of just the
+necessary information in messages between servers and replies from servers
+to clients, and it is not specialized to support the banking service.
+
+the main purpose of pseudo-code is to demonstrate and convey understanding
+of the algorithm.  clarity and readability are paramount.
+
+2.  describe your design for extending the algorithm to handle transfers.
+your design should satisfy the following requirement: if a transfer is
+performed by (i.e., reflected in the account history at) any living server
+of either bank involved in the transfer, then eventually all living servers
+for both involved banks perform the transfer, regardless of whether the
+client ever re-transmits the request.  informally, this prevents money from
+disappearing (if only the source bank processed the transfer) or being
+created (if only the destination bank processed the transfer).  note that
+transfers performed by servers that crash do not necessarily get performed
+by other servers; this is acceptable, because this algorithm does not use
+persistent storage.  furthermore, the design should not use any explicit
+timeouts.  note that this prohibits explicit periodic repetition of some
+event until some other event occurs, because the periodic repetition is
+driven by timeouts.  as in the core algorithm, any timing dependence should
+be encapsulated in the assumption of perfect failure detection by the
+master and the assumption of reliable communication between servers.
+[UPDATE 2014-09-02: I rewrote this entire paragraph; re-read it carefully.]
+
+give a convincing argument that your design is correct.  for examples of
+such arguments, see the proof of correctness in [vRS2004chain] and in the
+lecture notes on chain replication, and the "Why It Works" sections in
+[vrG2010replication].
+
+clarity and correctness are critical.  keep the design reasonably simple.
+unnecessarily complicated designs will not receive full credit.  do not
+complicate the design to achieve minor optimizations.  on the other hand,
+the design should not contain inefficiencies that can be eliminated
+without appreciably complicating the design.  if you are uncertain whether
+you are striking the correct balance, you are welcome to ask the instructor
+for guidance, preferably during office hours.
+
+{UPDATE, 2014-09-18: Your design cannot change the functionality of the
+master.  the master's only role is failure detection.]
+
+3.  write complete pseudo-code for clients, servers, and the master that
+supports all operations, including transfer.  of course, most of the
+pseudo-code is copied from item 1.
+
+[UPDATE: to save paper, the printout you submit does not need to include
+item 1, since it is mostly a subset of item 3.]
+
+------------------------------------------------------------ 
+PHASE 2: NON-FAULT-TOLERANT SERVICE
+
+in both languages, implement and test the clients and servers, except do
+not implement algorithms to cope with failures, extend the chain, or
+support transfers.  thus, clients issue requests, and servers handle them
+appropriately (forwarding updates along the chain, etc.), provided no
+failures occur.
+
+------------------------------------------------------------ 
+PHASE 3: FAULT-TOLERANT SERVICE
+
+1.  in both languages, implement the master, extend the implementation with
+algorithms to cope with failures and extend the chain, and test everything.
+
+2.  write a comparison of your experience implementing the algorithm in the
+two languages.  discuss and compare the size of the code in each language,
+time and effort to write the initial version of the code, time and effort
+to debug the initial version of the code, readability of the code,
+similarity to the pseudo-code, and any other comments on the strengths and
+weaknesses of the languages for various types of programming.  ideas for
+language improvements are also welcome.
+
+------------------------------------------------------------ 
+PHASE 4: TRANSFERS
+
+in one language of your choice, implement the extension to support
+transfers.  if the design of the extension has changed after your phase 1
+submission, update the description and pseudo-code from phase 1 to be
+consistent with the implementation.
+
+============================================================
+SUBMISSION INSTRUCTIONS
+
+PHASE 0: send the email by 11:59pm on the due date.
+
+PHASE 1: submit a printout in class on the due date, and submit the
+document in the Assignments area on Blackboard by 11:59pm on the due date.
+
+REMAINING PHASES: submit a zip (or tar) file in the Assignments area in
+Blackboard by 11:59pm on the due date.  the file should be named
+lastname1-lastname2-phaseN.zip (or lastname1-lastname2-phaseN.tar.gz),
+where lastname1 and lastname2 are the last names of the team members, and N
+is the phase number; for example, kenobi-skywalker-phase1.zip.  
+
+[UPDATE, 2014-09-19: please leave the Comment box blank when you submit the
+assignment on Blackboard.  we look only at the uploaded files.]
+
+the zip (or tar) file should have the following structure and contents:
+
+  README.txt   see details below
+  testing.txt  description of testcases (see below)
+  config/      configuration files
+  src/client/  source code for client
+  src/server/  source code for server
+  src/master/  source code for master
+  src/common/  source code used for multiple kinds of processes
+  logs/        log files from running testcases described in README.txt
+  phase1/      current version of material from phase1
+
+README.txt should contain the following sections:
+
+  INSTRUCTIONS.  instructions to compile and run your code.  the
+  instructions should not assume that an IDE is installed.  for
+  compilation, supply a Makefile or a detailed sequence of commands, not an
+  IDE's project file.  include a specific example of the command to run a
+  selected testcase.
+
+  MAIN FILES (phases 2-4 only).  The full pathname (in your zip or tar
+  file) of the files containing the main code for the client, server, and
+  master.  (This will help graders look at the most important/interesting 
+  code first, and look at other code used by it as needed.)
+  [UPDATE, 2014-09-16: I added this item.]
+
+  BUGS AND LIMITATIONS.  a list of all known bugs in and limitations of
+  your code.
+
+  LANGUAGE COMPARISON (phase 3 only).  comparison of your experience
+  implementing the algorithm in the two languages.
+
+  CONTRIBUTIONS.  a list of contributions of each team member to the
+  current submission.  this should reflect how the work was divided between
+  the team members.  generally, a dozen lines or so is sufficient detail.
+
+  OTHER COMMENTS.  anything else you want us to know.
+
+testing.txt should contain an entry for each testcase you developed.  each
+entry should include: (1) description of the tested scenario (including
+when failures occur), and (if appropriate) the specific aspect of the
+program targeted by this scenario, (2) the name of the configuration file
+used to run this testcase, (3) other information (if any) needed to run the
+testcase, the expected outcome (passed or failed, with a brief explanation
+of the problem if it failed).  testcases should be cumulative; in other
+words, later submissions should include the testcases from previous
+submissions.  you should have numerous testcases, so testing.txt should be
+organized into sections in some reasonable way, so testcases for similar
+scenarios are in the same section.
+
+============================================================
+SCHEDULE: PROJECT AND HOMEWORK DUE DATES, EXAM DATES
+
+sep  5 phase 0: team formation (2 weeks)
+sep 19 phase 1: pseudo-code  (2 weeks)
+oct 13 phase 2: non-fault-tolerant service (3 weeks
+  [UPDATE 2014-09-29: changed phase 2 due date from oct 10 to oct 13]
+oct 17 hw1
+oct 24 midterm exam
+nov  7 phase 3: fault-tol svc (4 wks after phase2 - 1 wk for hw1&exam = 3 weeks)
+nov 21 phase 4: transfers (2 weeks)
+dec 5 hw2 last day of class
+dec 17 8am-10:45am (incl 15min for exam admin) final exam
+
+the time interval in parentheses is the amount of time allocated for work
+on that phase of the project.
+
+[UPDATE 2014-09-02: I added dates for homeworks and exams.  I changed phase2
+due date from oct 31 to nov 7, due to hw1 and the midterm. ]
+
+============================================================
+GRADING WEIGHTS (relative to the weight of the project in the course grade)
+
+20% phase 1: pseudo-code
+30% phase 2: non-fault-tolerant service
+30% phase 3: fault-tolerant service
+20% phase 4: transfers
+
+============================================================
+GRADING CRITERIA
+
+several factors will be considered in grading, including:
+
+functional correctness of code.
+
+thorough testing.
+
+code quality.  this encompasses all aspects of code quality other than
+functional correctness, such as clarity, readability, maintainability,
+extensibility, and efficiency.  one general measure of clarity is
+similarity to high-level pseudo-code.  other factors include:
+
+  Meaningful names for classes, methods, variables, etc.
+
+  Consistent coding conventions
+
+  Sufficient comments.
+
+  Appropriate use of language features.  In DistAlgo, this includes use of
+  DistAlgo-specific features and Python features, such as comprehensions.
+  In general, it includes use of features such as inheritance, methods,
+  generic types, comprehensions, enumeration types, for-each loops, and
+  assertions.  For example, methods, inheritance, and loops should be used
+  to avoid repeating blocks of identical or very similar code.  Low-level
+  code should be encapsulated in methods.
+
+  Modularity.  The code should be structured in a reasonable way into
+  packages (if appropriate), classes and methods.  
+
+there is sometimes a trade-off between clarity and efficiency.  the code
+should not contain inefficiencies that can be eliminated without
+appreciably complicating the code, but do not complicate the code to
+achieve minor optimizations.  in many settings, including this class, code
+clarity, readability, maintainability, etc., are more important.  if you
+are uncertain whether you are striking the correct balance, you are welcome
+to ask the instructor for guidance, preferably during office hours.
+
+============================================================
+DEMOS
+
+demos will be held in the grad PC lab.  you may run the demo on one of the
+lab PCs or your own laptop.
+
+bring a printout of your README to the demo.  the TA will write notes on it
+and keep it after the demo.
+
+the demo timeslots are fairly short, so you should decide in advance which
+testcases that you want to show the TA in order to convince him that your
+program is correct.  please login and get organized in advance, so you are
+ready to start running your program when your demo timeslot begins.

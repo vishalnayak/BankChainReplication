@@ -1,0 +1,47 @@
+log of sent message should contain a send sequence number n, indicating that it is for the n'th message sent by this process.
+
+log of sent message should contain a receive sequence number n, indicating that it is for the n'th message received by this process.  
+(send and receive sequence numbers are useful for choosing server lifetimes that correspond to interesting failure scenarios.)
+
+description of the tested scenario (including when failures occur), and (if appropriate) the specific aspect of the
+program targeted by this scenario 
+
+the name of the configuration file used to run this testcase
+
+other information (if any) needed to run the testcase
+
+the expected outcome (passed or failed, with a brief explanation of the problem if it failed).
+
+testcases should be cumulative; in other words, later submissions should include the testcases from previous
+submissions.
+
+============================================================
+
+nov 21 phase 4: transfers (2 weeks)
+dec 5 hw2 last day of class
+dec 17 8am-10:45am (incl 15min for exam admin) final exam
+
+------------------------------------------------------------ 
+PHASE 4: TRANSFERS
+
+-- update pseudocode from phase 1.
+
+  transfer(reqID, accountNum, amount, destBank, destAccount): 
+  if a transaction with this reqID has not already been processed, and the
+  account balance is at least the transfer amount, 
+  then transfer the requested amount of funds from the specified account in this bank to
+  destAccount in destBank, and return <reqID, Processed, balance>.
+  
+  if a transfer with this reqID has not already been processed, and the account
+  balance is less than the transfer amount, return <reqID, InsufficientFunds, balance>. 
+  
+  If exactly the same transaction has already been processed, re-send the same reply. 
+  
+  If a different transaction with the same reqID has been processed, return <reqID, InconsistentWithHistory, 
+  balance>.
+  
+  It is acceptable for a server of either the source bank or the destination bank to send a
+  reply to the client.
+  
+  
+-----------------------------------------------

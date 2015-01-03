@@ -1,0 +1,62 @@
+Copy the config.properties files in the below folders to src/ and run the code.
+
+1) testing/phase3/1_messageLoss/config.properties
+Simulating message loss from client.
+
+2) testing/phase3/2_failureNotifications/config.properties
+Client handling the failure of servers. By retrying the requests.
+
+3) testing/phase3/3_failedHead/config.properties
+Tests the failure of Head server in the chain.
+
+4) testing/phase3/4_failedTail/config.properties
+Tests the failure of Tail server in the chain.
+
+5) testing/phase3/5_failedInternalProcess/config.properties
+Tests the failure of Internal server in the chain.
+
+6) testing/phase3/6_failedInternalServerAndPredecessor/config.properties
+Tests the case where-in an internal server is failed and during the propagation of pending requests, the predecessor also fails. 
+
+7) testing/phase3/7_failedInternalServerAndSuccessor/config.properties
+Tests the case where-in an internal server is failed and during the processing of pending requests, the successor also fails.
+
+8) testing/phase3/8_Acknowledgements/config.properties
+Tests whether the acknowledgement for each request is properly propagated to all the predecessors.
+
+9) testing/phase3/9_chainExtensionBasicCase/config.properties
+Tests the addition of a new server to the existing chain.
+
+10) testing/phase3/10_chainExtensionWithCurrentTailFailure/config.properties
+Tests the chain extension if the current tail fails during the extension.
+
+11) testing/phase3/11_greacefulAbortWhenNewServerFails/config.properties
+Tests the chain extension if the new server being added fails before the extension completes.
+
+12) testing/phase3/12_detectFAiluresInMaster/config.properties
+Tests if Master process is capable of properly detect failures of servers.
+
+13) testing/phase3/13_chainExtensionInMaster/config.properties
+Tests the responsibilities of Master during chain extension.
+
+14) testing/phase4/1_handleDuplicateRequestTransfer
+Self explanatory.
+
+15) testing/phase4/2_handleInsufficientFundsTransfer
+Self explanatory.
+
+16) testing/phase4/3_successfulTransferParallelToOtherRequests
+successful transfer in absence of failures, with both banks receiving pseudo-random
+deposits and withdrawals from other clients while transfer is in progress.
+
+17) testing/phase4/4_successfulTransferBank2HeadFail
+successful transfer when head of bank2 fails immediately after receiving the transfer
+request. to complete the transfer, a bank1 server needs to re-send the transfer request
+to the new head of bank2.
+
+18) testing/phase4/5_successfulTransferBank1SenderFailBank2HeadFail
+successful transfer when the bank1 server s1 that sends the transfer request to head of
+bank2 fails immediately after sending it, and head of bank2 fails immediately after
+receiving it. to complete the transfer, another bank1 server s1' needs to re-send the
+transfer request to the new head of bank2. (in the suggested design for the transfer
+operation, s1 is the original tail of bank1, and s1' is the predecessor of s1.)

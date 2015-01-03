@@ -1,0 +1,18 @@
+1) Setting up the project in eclipse:
+- Help->install new software->subversive
+- Project->New->Other->SVN->Project from SVN
+- If prompted to install connectors: Native HL 1.8.9 connector for 64 bit
+- URL: https://svn.cs.stonybrook.edu/repos/cse535-01/
+- Use CS Department credentials
+- Check out option: Find projects in the children
+
+2) Debugging:
+a) if ports from previous run of the project is still occupied
+netstat -ano | find <portNumber>
+taskkill /pid <pid> /f
+
+3) Run ChainReplication.java as a java application
+
+4) To kill all the listening servers at once.
+Run the following from command prompt.
+wmic process where "name like '%java%'" delete 
